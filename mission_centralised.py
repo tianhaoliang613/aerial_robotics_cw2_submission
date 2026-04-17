@@ -116,12 +116,19 @@ class MissionDrone(_DroneInterfaceBase):
     takeoff/go_to/land on first use.
     """
 
-    # Module alias -> import path used by DroneInterfaceBase.load_module.
+    # Module alias -> module name consumed by DroneInterfaceBase.load_module.
+    #
+    # IMPORTANT: load_module() already resolves inside
+    # ``as2_python_api.modules.<name>`` (or ``<name>_module``). Passing a full
+    # absolute import path here makes it prepend ``as2_python_api.modules.``
+    # again, which becomes the broken
+    # ``as2_python_api.modules.as2_python_api.modules.takeoff_module`` and
+    # silently disables takeoff/go_to/land for stage1-3/all.
     _BEHAVIOUR_MODULES = {
-        "takeoff": "as2_python_api.modules.takeoff_module",
-        "land": "as2_python_api.modules.land_module",
-        "go_to": "as2_python_api.modules.go_to_module",
-        "follow_path": "as2_python_api.modules.follow_path_module",
+        "takeoff": "takeoff",
+        "land": "land",
+        "go_to": "go_to",
+        "follow_path": "follow_path",
     }
 
     def __init__(self, namespace: str, verbose: bool = False, use_sim_time: bool = True):

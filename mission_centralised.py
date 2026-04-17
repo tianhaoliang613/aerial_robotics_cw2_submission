@@ -1459,14 +1459,118 @@ class CentralisedMission:
         self.metrics[stage_name] = metrics
         return metrics
 
+    def _stage_entry_xy(self, name: str) -> Optional[Tuple[float, float]]:
+        """Return the (x, y) at which ``name`` expects to start in stage1-3 (run_plan stages).
+
+        Stage 4 streams its own takeoff and entry, so we still ferry the swarm
+        to stage4's start_point so it doesn't have to fly across stage3's
+        forest at low altitude during its own warmup.
+        """
+        s = self.scenario
+        if name == "stage1" and s.stage1 is not None:
+            wps = self.planner.plan_stage1().waypoints
+            if wps:
+                return (wps[0][0], wps[0][1])
+        if name == "stage2" and s.stage2 is not None:
+            wps = self.planner.plan_stage2().waypoints
+            if wps:
+                return (wps[0][0], wps[0][1])
+        if name == "stage3" and s.stage3 is not None:
+            return (s.stage3.start_point_global[0], s.stage3.start_point_global[1])
+        if name == "stage4" and s.stage4 is not None:
+            return (s.stage4.start_point_global[0], s.stage4.start_point_global[1])
+        return None
+
+    def _stage_exit_xy(self, name: str) -> Optional[Tuple[float, float]]:
+        """Best-effort exit pose of a stage (used as ferry origin for the next)."""
+        s = self.scenario
+        if name == "stage1" and s.stage1 is not None:
+            wps = self.planner.plan_stage1().waypoints
+            if wps:
+                return (wps[-1][0], wps[-1][1])
+        if name == "stage2" and s.stage2 is not None:
+            wps = self.planner.plan_stage2().waypoints
+            if wps:
+                return (wps[-1][0], wps[-1][1])
+        if name == "stage3" and s.stage3 is not None:
+            wps = self.planner.plan_stage3().waypoints
+            if wps:
+                return (wps[-1][0], wps[-1][1])
+        if name == "stage4" and s.stage4 is not None:
+            return (s.stage4.end_point_global[0], s.stage4.end_point_global[1])
+        return None
+
+    def _inter_stage_ferry(
+        self,
+        from_xy: Tuple[float, float],
+        to_xy: Tuple[float, float],
+        ferry_height: float = 6.0,
+        ferry_speed: float = 1.2,
+    ) -> bool:
+        """Fly the whole swarm at high altitude from from_xy to to_xy.
+
+        4 stages live in 4 different quadrants of a 10x10 stage_size grid and
+        stage3 / stage4 contain 5 m tall obstacles. Cruising at 1.2 m between
+        stages would slam the leader into stage3's forest on stage3->stage4,
+        and into stage2's walls on stage1->stage2 in some scenarios. So
+        between stages we ascend to ferry_height (default 6 m, above the
+        5 m obstacle_height), translate horizontally to the next stage's
+        entry point, and descend back to cruise_height. Followers stay in a
+        ``line`` formation along the ferry direction so the column doesn't
+        sweep sideways through anything.
+        """
+        if self.dry_run:
+            return True
+        cx, cy = from_xy
+        tx, ty = to_xy
+        cruise_h = self.planner.cruise_height
+        legs: List[Vec3] = [
+            (cx, cy, ferry_height),
+            (tx, ty, ferry_height),
+            (tx, ty, cruise_h),
+        ]
+        prev: Tuple[float, float] = from_xy
+        for waypoint in legs:
+            dx = waypoint[0] - prev[0]
+            dy = waypoint[1] - prev[1]
+            yaw = math.atan2(dy, dx) if math.hypot(dx, dy) > 1e-3 else 0.0
+            follower_targets = self.controller.compute_targets(
+                leader_position=waypoint,
+                leader_yaw=yaw,
+                formation_name="line",
+                previous_formation_name="line",
+                transition_alpha=1.0,
+            )
+            ok = self._command_swarm_step(
+                leader_target=waypoint,
+                follower_targets=follower_targets,
+                speed=ferry_speed,
+                yaw_mode=YawMode.PATH_FACING,
+                yaw_angle=None,
+            )
+            if not ok:
+                self._log(f"[ferry] command timeout flying to {waypoint}")
+                return False
+            prev = (waypoint[0], waypoint[1])
+        return True
+
     def run_selected_stages(self, stage: str) -> Dict[str, StageMetrics]:
         ordered = [("stage1", self.run_stage1), ("stage2", self.run_stage2), ("stage3", self.run_stage3), ("stage4", self.run_stage4)]
         outputs: Dict[str, StageMetrics] = {}
+        last_exit: Optional[Tuple[float, float]] = None
         for name, fn in ordered:
             if stage != "all" and stage != name:
                 continue
+            if stage == "all" and last_exit is not None:
+                entry = self._stage_entry_xy(name)
+                if entry is not None:
+                    self._log(f"Inter-stage ferry: {last_exit} -> {entry} (above obstacles)")
+                    self._inter_stage_ferry(from_xy=last_exit, to_xy=entry)
             self._log(f"Running {name}")
             outputs[name] = fn()
+            exit_xy = self._stage_exit_xy(name)
+            if exit_xy is not None:
+                last_exit = exit_xy
         return outputs
 
     def export_metrics(self, output_dir: Path) -> None:

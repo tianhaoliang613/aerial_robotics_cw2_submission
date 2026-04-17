@@ -1,0 +1,49 @@
+world_name: "empty"
+origin:
+    latitude: 40.337494
+    longitude: -3.883197
+    altitude: 100.0
+# Stage4 dedicated spawn template.
+# Drones cluster at A = (6.5, 6) -- 1.5 m EAST of the stage4 floor edge
+# (floor spans x in [-5, 5]) so the swarm is CLEAR of the dynamic-obstacle
+# drift zone at launch. drone0 (leader) spawns exactly on A; cruise leg
+# goes straight WEST across the middle of the obstacle band from
+# A = (6.5, 6) to B = (-6.5, 6) -- 13 m traversal through a 10 m dynamic
+# obstacle field. (In Gazebo's current camera, +X goes UP in screen, so
+# A is at the top of the view and the cruise reads as "top -> bottom".)
+drones:
+  - model_type: "crazyflie_led_ring"
+    model_name: "drone0"
+    flight_time: 60
+    xyz:
+      - 6.5
+      - 6.0
+      - 0.2
+  - model_type: "crazyflie_led_ring"
+    model_name: "drone1"
+    flight_time: 60
+    xyz:
+      - 6.5
+      - 6.5
+      - 0.2
+  - model_type: "crazyflie_led_ring"
+    model_name: "drone2"
+    flight_time: 60
+    xyz:
+      - 6.5
+      - 5.5
+      - 0.2
+  - model_type: "crazyflie_led_ring"
+    model_name: "drone3"
+    flight_time: 60
+    xyz:
+      - 7.0
+      - 6.0
+      - 0.2
+  - model_type: "crazyflie_led_ring"
+    model_name: "drone4"
+    flight_time: 60
+    xyz:
+      - 6.0
+      - 6.0
+      - 0.2

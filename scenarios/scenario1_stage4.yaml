@@ -1,0 +1,22 @@
+drone_start_pose:
+  x: 6.5
+  y: 6.0
+  z: 0.0
+name: scenario1
+stage_size: [10.0, 10.0]
+stage4:
+  stage_center: [0.0, 6.0]
+  # Physical spawn (world_swarm_stage4.yaml) places the 5-drone cluster at
+  # A = (6.5, 6) -- 1.5 m EAST of the stage4 floor edge x=5, so drones are
+  # CLEAR of the dynamic-obstacle drift zone at launch. drone0 (leader)
+  # spawns exactly on A. B is the mirror of A through stage_center (0, 6),
+  # placing it 1.5 m WEST of the west floor edge; the cruise leg therefore
+  # runs straight east -> west through the middle of the obstacle band
+  # (y = 6, total 13 m). In Gazebo's current camera +X is "up" on screen,
+  # so this reads visually as "spawn at top, fly down across obstacles".
+  start_point: [6.5, 0.0]    # rel to stage_center (0, 6) -> abs (6.5, 6)  == A == spawn(drone0)
+  end_point:   [-6.5, 0.0]   # rel to stage_center (0, 6) -> abs (-6.5, 6) == B == mirror of A
+  num_obstacles: 5
+  obstacle_velocity: 0.5
+  obstacle_height: 5.0
+  obstacle_diameter: 0.5

@@ -145,7 +145,18 @@ for namespace in ${drone_namespaces[@]}; do
     scenario_file=${scenario_file} \
     ${tmuxinator_end}"
 
-  sleep 0.2 # Wait for tmuxinator to finish
+  # Stagger drone tmuxinator startup. With 5 drones AND a full 4-stage scenario
+  # (scenario1.yaml has ~18 spawnable objects -- circle markers, walls,
+  # trees, dynamic obstacles), launching all platform_gazebo nodes within
+  # 1 s of each other races every drone's spawn against the simulator's
+  # /world/empty/create service timeout, and the LAST drone (drone4) is
+  # the one that gets dropped (observed: drone4 stuck at platform=0,
+  # set_arming_state=missing). Increasing the inter-drone delay to 2 s
+  # lets Gazebo finish each drone's spawn (and any in-flight object
+  # spawn) before the next drone's platform launch starts hammering the
+  # service. Single-stage scenarios still launch in ~10 s extra; the full
+  # scenario1.yaml run is now reliable.
+  sleep 2.0
 done
 
 # Attach to tmux session

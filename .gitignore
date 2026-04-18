@@ -8,24 +8,11 @@ __pycache__
 *.db3
 *.pyc
 
-# Runtime artefacts; keep committed metric exports for coursework submission.
+# Runtime artefacts; only the coursework summary md is tracked under results/.
 results/*
 !results/centralised/
 results/centralised/*
-!results/centralised/README_对比规范.md
 !results/centralised/四阶段指标汇总_报告用.md
-!results/centralised/stage1/
-results/centralised/stage1/*
-!results/centralised/stage1/阶段1_仿真结果.md
-!results/centralised/stage2/
-results/centralised/stage2/*
-!results/centralised/stage2/阶段2_仿真结果.md
-!results/centralised/stage3/
-results/centralised/stage3/*
-!results/centralised/stage3/阶段3_仿真结果.md
-!results/centralised/stage4/
-results/centralised/stage4/*
-!results/centralised/stage4/阶段4_仿真结果.md
 /tmp/metrics_*
 
 # Generated world (templated from scenarios + config/world_swarm*.yaml).

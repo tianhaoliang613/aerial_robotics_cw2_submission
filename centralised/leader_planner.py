@@ -90,10 +90,12 @@ class LeaderPlanner:
         entry_x = sorted_windows[0].center_global_xy[0] if sorted_windows else stage.stage_center[0]
         entry = (entry_x, entry_y, self.cruise_height)
         route.append(entry)
-        # Start directly in column so the swarm never needs the extra
-        # diamond->column transition before the first window (which the user
-        # observed as unnecessary jitter at the entry).
-        formations.append("columnn")
+        # Rally in ``diamond`` at the entry point: this gives us a cheap,
+        # safe formation switch (diamond -> columnn) during the long entry
+        # segment to the first window's pre-approach, which is the only
+        # stretch of open stage we have. Reform between walls is not safe
+        # in tight scenarios (see ``if idx_w != last_idx`` branch below).
+        formations.append("diamond")
 
         last_idx = len(sorted_windows) - 1
         for idx_w, window in enumerate(sorted_windows):
@@ -109,35 +111,65 @@ class LeaderPlanner:
             # Re-form after leaving the wall, but skip the reform for the last
             # window (go straight to the clearance/exit instead of overshooting).
             if idx_w != last_idx:
-                reform = (transitions[-1][0], transitions[-1][1] + cross_direction * 0.9, self.cruise_height)
-                route.append(reform)
-                formations.append("diamond")
+                # Hold columnn until the tail drone (~2 m behind the leader)
+                # has also cleared the current wall, but never overshoot into
+                # the next wall's approach corridor. In tight scenarios (eg.
+                # ~4 m between walls) we skip the diamond reform entirely:
+                # it would force a lateral spread-and-recompress within less
+                # than the column length, which is what caused followers to
+                # scrape the wall edges previously.
+                post_x, post_y, post_z = transitions[-1]
+                next_window = sorted_windows[idx_w + 1]
+                next_wy = float(next_window.center_global_xy[1])
+                # next_pre lives ``approach_offset`` (=1.1 m) north of the next
+                # wall along the travel direction.
+                next_pre_y = next_wy - cross_direction * 1.1
+                corridor = abs(next_pre_y - post_y)
+                # Desired tail-clearance hold is 2.2 m past ``post``, but we
+                # leave at least 0.2 m of corridor before next_pre.
+                desired_hold = 2.2
+                hold_offset = min(desired_hold, max(0.0, corridor - 0.2))
+                if hold_offset > 0.05:
+                    hold_y = post_y + cross_direction * hold_offset
+                    route.append((post_x, hold_y, post_z))
+                    formations.append("columnn")
+                    hold_anchor_y = hold_y
+                else:
+                    hold_anchor_y = post_y
+                # Diamond reform only if there is >=1.5 m of room after the
+                # hold to both spread out and compress back before next_pre.
+                remaining = abs(next_pre_y - hold_anchor_y)
+                if remaining >= 1.5:
+                    reform_offset = min(1.0, remaining - 0.5)
+                    reform_y = hold_anchor_y + cross_direction * reform_offset
+                    route.append((post_x, reform_y, self.cruise_height))
+                    formations.append("diamond")
+                # else: stay in columnn straight into next_pre; the scenario
+                # is simply too tight for a meaningful diamond reform.
             else:
                 # Last window: keep the column at pass_height until the trailing
-                # drone (~2.0 m behind the leader with clamped spacing 0.5 m)
-                # has also cleared the wall. Only then descend -- still in
-                # column -- so nobody crosses the wall at a z below the gap.
+                # drone has cleared the wall, then descend in-place (same y) so
+                # z changes happen without dragging the tail back over the wall.
                 post_x, post_y, pass_height = transitions[-1]
-                # Push the leader further past the wall so the trailing drone
-                # also gets a comfortable margin. Hug the stage boundary
-                # (only 0.05 m inset) rather than the earlier 0.2 m, and go
-                # beyond the strict chain-length estimate (2 m) to 3.0 m.
-                clearance_y = post_y + cross_direction * 3.0
+                # Push as far past the wall as the stage boundary allows, aiming
+                # for 3.5 m past ``post``.
+                clearance_y = post_y + cross_direction * 3.5
                 if cross_direction < 0:
                     clearance_y = max(clearance_y, stage_min_y + 0.05)
                 else:
                     clearance_y = min(clearance_y, stage_max_y - 0.05)
                 route.append((post_x, clearance_y, pass_height))
                 formations.append("columnn")
-                # Nudge the descent point slightly further south (same sign as
-                # the crossing) so heading_between(clearance, descent) stays
-                # along the crossing direction instead of degenerating to 0,
-                # which would swing the column sideways.
-                descent_y = clearance_y + cross_direction * 0.1
+                # Compute remaining stage room ahead of clearance; if we are
+                # already hugging the boundary, do an in-place descent rather
+                # than overshoot and be clamped BACKWARDS (which would reverse
+                # the travel direction and confuse the yaw heading).
                 if cross_direction < 0:
-                    descent_y = max(descent_y, stage_min_y + 0.1)
+                    room_ahead = max(0.0, clearance_y - (stage_min_y + 0.1))
                 else:
-                    descent_y = min(descent_y, stage_max_y - 0.1)
+                    room_ahead = max(0.0, (stage_max_y - 0.1) - clearance_y)
+                descent_step = min(0.8, room_ahead)
+                descent_y = clearance_y + cross_direction * descent_step
                 route.append((post_x, descent_y, self.cruise_height))
                 formations.append("columnn")
 
@@ -148,14 +180,15 @@ class LeaderPlanner:
         return StagePlan(route, formations)
 
     def plan_stage3(self) -> StagePlan:
-        """Forest traversal using A* + columnn compression.
+        """Forest traversal: columnn (single-file) from rally to exit.
 
-        Compliant-but-simple strategy that has been verified to fly safely:
-          * rally at start_point in ``square``
-          * leader follows an A* path through the forest, swarm in ``columnn``
-          * one extra ``tail_clear`` waypoint past end_point so the tail drone
-            fully exits the last tree before we reform
-          * reform into ``square`` at rally_out near end_point
+        Stage3's obstacle field is a dense set of narrow tree trunks. Any
+        laterally-wide formation (square, diamond, v, line) risks grazing
+        trees with its wingmen even when the leader's path is clear. We
+        use ``columnn`` for the ENTIRE stage -- rally, ferry, forest
+        traversal, and reform -- so the swarm is always one-drone wide
+        and followers literally retrace the leader's A* path via
+        trail-following (see ``run_stage3_streaming``).
         """
         stage = self.scenario.stage3
         if stage is None:
@@ -186,35 +219,16 @@ class LeaderPlanner:
         smooth_xy = smooth_path(path_xy)
         forest_wps = densify_polyline(smooth_xy, step=0.45, z=self.cruise_height)
 
-        # Drop trailing waypoints whose columnn tail (2 m behind leader) would
-        # overlap a tree.
-        tree_tail_margin = 0.4
-        def _tail_safe(w: Vec3) -> bool:
-            tail_x = w[0] - direction * 2.0
-            for (tx, ty) in stage.obstacles_global:
-                if ((tail_x - tx) ** 2 + (w[1] - ty) ** 2) ** 0.5 < (
-                    stage.obstacle_diameter / 2.0 + tree_tail_margin
-                ):
-                    return False
-            return True
-
-        while forest_wps and not _tail_safe(forest_wps[-1]):
-            forest_wps.pop()
-
         rally_in = (start_x, start_y, self.cruise_height)
         tail_clear_x = max(stage_min_x, min(stage_max_x, end_x + direction * 0.6))
         tail_clear = (tail_clear_x, end_y, self.cruise_height)
-        rally_out_x = max(stage_min_x, min(stage_max_x, end_x + direction * 0.8))
-        rally_out = (rally_out_x, end_y, self.cruise_height)
 
-        # Avoid duplicating start_point between rally_in and the A* path.
         forest_body = (
             forest_wps[1:] if forest_wps and forest_wps[0][:2] == stage.start_point_global else forest_wps
         )
-        forest_formations: List[str] = ["columnn" for _ in forest_body]
 
-        waypoints: List[Vec3] = [rally_in] + list(forest_body) + [tail_clear, rally_out]
-        formations: List[str] = ["square"] + forest_formations + ["columnn", "square"]
+        waypoints: List[Vec3] = [rally_in] + list(forest_body) + [tail_clear]
+        formations: List[str] = ["columnn"] * len(waypoints)
         return StagePlan(waypoints, formations)
 
     def plan_stage4(self, dynamic_obstacles: Optional[Sequence[DynamicObstacle]] = None) -> StagePlan:

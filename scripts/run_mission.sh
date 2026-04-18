@@ -24,6 +24,18 @@ CHALLENGE_DIR="$( cd -- "${SCRIPT_DIR}/.." &> /dev/null && pwd )"
 
 unset FASTRTPS_DEFAULT_PROFILES_FILE 2>/dev/null || true
 
+# Default: same Fast DDS builtin transports as launch_sim.sh (SHM+UDP).
+# If you hit stale-SHM init errors after a Killed mission, run stop_sim.sh
+# first, or opt in to UDP-only for this process only:
+#   CW2_MISSION_FASTDDS_UDP=1 ./scripts/run_mission.sh ...
+if [[ "${CW2_MISSION_FASTDDS_UDP:-0}" == "1" ]]; then
+    export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+    echo "[run_mission] CW2_MISSION_FASTDDS_UDP=1 -> FASTDDS_BUILTIN_TRANSPORTS=UDPv4"
+else
+    unset FASTDDS_BUILTIN_TRANSPORTS 2>/dev/null || true
+    echo "[run_mission] using default Fast DDS transports (match simulation)"
+fi
+
 # aerostack2 BehaviorHandler default wait is 60 s per behaviour / per
 # sub-service (action + pause + resume + stop = up to 240 s). If the stack
 # isn't ready that wait blocks the whole mission process while memory keeps
@@ -47,7 +59,10 @@ fi
 # `ros2 service list` reflects the current world. We never touch sim / tmux.
 pkill -9 -f "python3.*mission_centralised" 2>/dev/null || true
 ros2 daemon stop 2>/dev/null || true
+rm -rf /tmp/ros2-daemon-* 2>/dev/null || true
 sleep 0.5
+ros2 daemon start 2>/dev/null || true
+sleep 1.0
 
 # --- Pre-flight readiness check -------------------------------------------
 # Every drone must satisfy ALL of:
@@ -91,4 +106,7 @@ while true; do
     sleep 3
 done
 echo "[pre-flight] all drones ready (platform + arm/offboard svc), starting mission."
+# #region agent log
+python3 -c "import json,time,os;open('/home/tianhaoliang/.cursor/debug.log','a').write(json.dumps({'location':'run_mission.sh','message':'pre exec mission','hypothesisId':'H5','timestamp':int(time.time()*1000),'data':{'FASTDDS_BUILTIN_TRANSPORTS':os.environ.get('FASTDDS_BUILTIN_TRANSPORTS'),'argv':os.environ.get('_','')}})+'\n')" 2>/dev/null || true
+# #endregion
 exec python3 mission_centralised.py "$@"

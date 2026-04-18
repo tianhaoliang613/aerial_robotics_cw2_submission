@@ -51,10 +51,28 @@ def grid(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
 
 
 def orbit(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
+    """Four followers evenly spaced on a ring around the leader.
+
+    Slots are placed on the DIAGONAL quadrant centres
+    (angles pi/4, 3pi/4, 5pi/4, 7pi/4) rather than the cardinal
+    directions (0, pi/2, pi, 3pi/2). Rationale:
+
+    * The cardinal layout puts one follower at (+radius, 0), i.e. directly
+      in front of the leader along its heading. When a scheduler blends
+      from any rear-biased formation (line, v, diamond, staggered, grid)
+      into ``orbit``, that follower has to cross the leader's path --
+      stage1 telemetry showed this produced a 9.8 cm min-pair distance
+      and 76 near-miss ticks.
+    * The diagonal layout keeps ALL followers off the leader's ground
+      track (front and rear), so linear blending between orbit and any
+      rear-biased formation never forces a leader crossing.
+    * Pairwise slot separation stays = sqrt(2) * radius, preserving the
+      visual "ring around the leader" impression.
+    """
     radius = spacing * 1.6
     offsets: List[Offset] = []
     for i in range(4):
-        angle = i * (2.0 * pi / 4.0)
+        angle = pi / 4.0 + i * (pi / 2.0)
         offsets.append((radius * cos(angle), radius * sin(angle), z))
     return offsets
 

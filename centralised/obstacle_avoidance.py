@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from math import atan2, cos, hypot, sin
+from math import atan2, cos, hypot, radians, sin, tan
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 
@@ -172,20 +172,13 @@ def avoid_dynamic_obstacles(
     lookahead_s: float = 0.6,
     goal: Optional[Vec2] = None,
 ) -> Vec2:
-    """Reactive waypoint shift that deflects around nearby moving obstacles.
+    """Lateral shift for dynamic obstacles.
 
-    When ``goal`` is provided (stage4 recommended), deflection uses the
-    **mission corridor** drone → goal: only lateral offsets perpendicular to
-    that axis are applied. This avoids the old "drone → 2.5 m lookahead"
-    segment whose normal **rotates every tick**, which produced erratic
-    setpoints and sometimes a net shift that looked like flying **toward** a
-    pillar.
+    With ``goal`` (stage4): only obstacles **ahead** in a narrow cone toward the
+    goal contribute; abeam and behind are ignored so setpoints are not yanked
+    by irrelevant pillars.
 
-    When ``goal`` is ``None``, falls back to the legacy segment-based rule for
-    backward compatibility.
-
-    NOTE: Returns the **shifted waypoint** only; the drone's own position is
-    unchanged.
+    With ``goal`` is ``None``: legacy segment drone→waypoint rule.
     """
     if goal is not None:
         return _avoid_goal_corridor(
@@ -204,7 +197,16 @@ def _avoid_goal_corridor(
     lookahead_s: float,
     goal: Vec2,
 ) -> Vec2:
-    """Lateral-only avoidance w.r.t. the line drone → goal (stable normal)."""
+    """Lateral push along drone→goal ray.
+
+    * Half-plane ``s_along > 0`` drops obstacles behind the drone.
+    * Forward cone drops far-abeam clutter.
+    * Lateral clearance **ramps with along-distance**: only obstacles within a
+      **tight** strip react when they are still far ahead along the ray; within
+      ~4 m along-track the full ``min_d`` corridor applies so near head-on
+      pillars are not under-weighted while distant off-axis pillars stop
+      stealing the whole shift budget.
+    """
     gx_raw = goal[0] - drone_pos[0]
     gy_raw = goal[1] - drone_pos[1]
     g_len = hypot(gx_raw, gy_raw)
@@ -212,14 +214,29 @@ def _avoid_goal_corridor(
         return (next_waypoint[0], next_waypoint[1])
     gx = gx_raw / g_len
     gy = gy_raw / g_len
-    # Left normal to forward (mission axis).
     px, py = -gy, gx
+
+    # Forward cone: exclude obstacles *behind* (s<0) and far abeam. A narrow
+    # cone (~34°) filtered out many *ahead* pillars on stage4 (straight-line
+    # collision). ~58° + slack keeps head-on / diagonal threats while still
+    # dropping purely lateral clutter relative to the goal ray.
+    cone_tan = tan(radians(58.0))
+    s_ahead_min = 0.02
+    s_ahead_max = min(10.0, g_len + 0.8)
+    lateral_margin = 0.32
+    cone_slack = 0.5
+    # Beyond this along-distance (m), lateral reaction uses ``lateral_tight``
+    # only; closer uses full ``min_d + lateral_margin`` (see loop body).
+    near_along_m = 4.0
 
     shift_x = 0.0
     shift_y = 0.0
-    s_min = -0.4
-    s_max = 12.0
-    lateral_margin = 0.35
+
+    def _in_forward_cone(s_along: float, c_lat: float, rad: float) -> bool:
+        if s_along < s_ahead_min or s_along > s_ahead_max:
+            return False
+        lim = s_along * cone_tan + cone_slack + rad * 0.5
+        return abs(c_lat) <= lim
 
     for obstacle in obstacles:
         ox, oy = _predict_obstacle_xy(obstacle, next_waypoint, lookahead_s)
@@ -229,34 +246,39 @@ def _avoid_goal_corridor(
         toy = oy - drone_pos[1]
         s_along = tox * gx + toy * gy
         c_lat = tox * px + toy * py
-        if s_along < s_min or s_along > s_max:
+        d_d0 = hypot(tox, toy)
+        in_cone = _in_forward_cone(s_along, c_lat, obstacle.radius)
+        critical_near = d_d0 < (obstacle.radius + min_d * 0.42) and s_along > -0.08
+        if not in_cone and not critical_near:
             continue
 
         d_line = abs(c_lat)
-        if d_line < min_d + lateral_margin:
-            overlap = (min_d + lateral_margin - d_line) + 0.15
+        lateral_full = min_d + lateral_margin
+        lateral_tight = max(obstacle.radius * 2.5, 0.52) + 0.15
+        t_along = max(0.0, min(1.0, 1.0 - s_along / max(near_along_m, 1e-3)))
+        eff_clear = lateral_tight + (lateral_full - lateral_tight) * t_along
+        # Corridor shift only for cone-valid threats; ``critical_near`` alone
+        # uses the emergency push below (avoids lateral shove on grazing side).
+        if in_cone and d_line < eff_clear:
+            overlap = (eff_clear - d_line) + 0.12
             if overlap <= 0.0:
                 overlap = 0.0
-            # Obstacle on +c_lat side of corridor → steer waypoint to -p side.
             if abs(c_lat) < 1e-2:
                 sp = hypot(obstacle.vx, obstacle.vy)
                 if sp > 1e-3 and sp <= _MAX_TRUSTED_OBSTACLE_SPEED:
                     c_v = obstacle.vx * px + obstacle.vy * py
-                    # Obstacle sliding in +p → pass on the -p side (side=+1).
                     side = 1.0 if c_v > 0 else -1.0
                 else:
                     side = 1.0
             else:
                 side = 1.0 if c_lat > 0 else -1.0
-            w = min(overlap, 1.1)
+            w = min(overlap, 1.05)
             shift_x += -side * px * w
             shift_y += -side * py * w
 
-        # Emergency: very close to drone — push only in the plane ⟂ goal
-        # (no component along -g that would command "back up into" clutter).
-        d_d = hypot(tox, toy)
-        em_r = min_d + 0.65
-        if d_d < em_r and d_d > 1e-4:
+        d_d = d_d0
+        em_r = min_d + 0.55
+        if d_d < em_r and d_d > 1e-4 and (in_cone or critical_near):
             rdx = (drone_pos[0] - ox) / d_d
             rdy = (drone_pos[1] - oy) / d_d
             along = rdx * gx + rdy * gy
@@ -266,11 +288,10 @@ def _avoid_goal_corridor(
             if lnorm > 1e-3:
                 lx /= lnorm
                 ly /= lnorm
-                overlap_e = (em_r - d_d) + 0.25
-                shift_x += lx * overlap_e * 1.1
-                shift_y += ly * overlap_e * 1.1
+                overlap_e = (em_r - d_d) + 0.2
+                shift_x += lx * overlap_e * 1.05
+                shift_y += ly * overlap_e * 1.05
 
-    # Cap combined lateral impulse so five pillars do not explode the shift.
     mag = hypot(shift_x, shift_y)
     cap = 2.8
     if mag > cap and mag > 1e-6:

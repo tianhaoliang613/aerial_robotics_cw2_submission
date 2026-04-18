@@ -179,6 +179,23 @@ def _parse_stage4(raw: Dict) -> Stage4Spec:
     )
 
 
+def load_world_drone_spawns_by_model_name(world_path: Path) -> Dict[str, Tuple[float, float, float]]:
+    """Parse ``drones:`` entries from a Gazebo world YAML (e.g. world_swarm_stage4).
+
+    Returns ``model_name -> (x, y, z)`` in earth frame as listed under ``xyz``.
+    """
+    with world_path.open("r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle)
+    out: Dict[str, Tuple[float, float, float]] = {}
+    for entry in raw.get("drones", []) or []:
+        name = entry.get("model_name")
+        xyz = entry.get("xyz")
+        if not name or not xyz or len(xyz) < 3:
+            continue
+        out[str(name)] = (float(xyz[0]), float(xyz[1]), float(xyz[2]))
+    return out
+
+
 def load_scenario(path: str) -> ScenarioSpec:
     """Load scenario yaml and convert into typed configuration objects."""
     scenario_path = Path(path)

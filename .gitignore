@@ -21,3 +21,17 @@ config_sim/world/
 # Editor metadata.
 .idea/
 *.swp
+
+# --- 以下仅本地保留，不作课程代码提交（集中式 CW2 见 mission_centralised.py + centralised/）---
+/scripts/
+/docs/
+/tests/
+/pyproject.toml
+/requirements-dev.txt
+/README_CW2.md
+/mission.py
+/mission_behavior_tree.py
+/mission_interpreter.py
+/mission_lights.py
+/mission_swarm.py
+/mission_swarm_simple_change_lights.py

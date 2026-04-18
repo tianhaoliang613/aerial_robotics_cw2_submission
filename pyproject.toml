@@ -1,4 +1,0 @@
-[tool.vulture]
-paths = ["mission_centralised.py", "centralised"]
-exclude = ["**/config_sim/**"]
-min_confidence = 90

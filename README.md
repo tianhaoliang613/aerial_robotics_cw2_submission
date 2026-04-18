@@ -2,7 +2,9 @@
 
 This repository contains the second coursework for the UCL Aerial Robotics Module COMP0240.
 
-![scenario1](docs/scenario1.png)
+**集中式 CW2 任务入口**：仿真与地面站就绪后，在仓库根目录执行 `python3 mission_centralised.py --help`（需先 `source <ws>/install/setup.bash`）。官方说明见 [CW2 Challenge](https://ucl-msc-rai-comp0240.github.io/7_challenge_multi_drone/)。
+
+示意图见课程说明：[Multi-Drone Challenge (CW2)](https://ucl-msc-rai-comp0240.github.io/7_challenge_multi_drone/)。
 
 This challenge has been developed on top of the aerostack2 platform 
 
@@ -70,7 +72,7 @@ In groups of 2, you will be investigating, developing and testing your algorithm
     - Using your formation flying methods attempt to maneouever your swarm of drones through a set of dynamically moving obstacles.  
     - You may need adaptive formation control to respond to changes in real time.
 
-![scenario1](docs/schematic.png)
+（环境示意图同上课程页面。）
 
 ## Hardware Challenge Event at HereEast on 16th and 23rd March
 

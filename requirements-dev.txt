@@ -1,2 +1,0 @@
-# Optional dev tools for centralised package (not required at runtime).
-vulture>=2.11

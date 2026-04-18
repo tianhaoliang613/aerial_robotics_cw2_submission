@@ -22,11 +22,9 @@ from typing import Dict, List, Optional
 try:
     import rclpy
     from rclpy.executors import SingleThreadedExecutor
-    from rclpy.node import Node
     from geometry_msgs.msg import Pose
 except ImportError:  # pragma: no cover - dry-run without ROS2 sourced
     rclpy = None  # type: ignore[assignment]
-    Node = object  # type: ignore[assignment]
     SingleThreadedExecutor = object  # type: ignore[assignment]
     Pose = None  # type: ignore[assignment]
 

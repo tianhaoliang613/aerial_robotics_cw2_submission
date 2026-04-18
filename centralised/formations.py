@@ -51,24 +51,7 @@ def grid(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
 
 
 def orbit(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
-    """Four followers evenly spaced on a ring around the leader.
-
-    Slots are placed on the DIAGONAL quadrant centres
-    (angles pi/4, 3pi/4, 5pi/4, 7pi/4) rather than the cardinal
-    directions (0, pi/2, pi, 3pi/2). Rationale:
-
-    * The cardinal layout puts one follower at (+radius, 0), i.e. directly
-      in front of the leader along its heading. When a scheduler blends
-      from any rear-biased formation (line, v, diamond, staggered, grid)
-      into ``orbit``, that follower has to cross the leader's path --
-      stage1 telemetry showed this produced a 9.8 cm min-pair distance
-      and 76 near-miss ticks.
-    * The diagonal layout keeps ALL followers off the leader's ground
-      track (front and rear), so linear blending between orbit and any
-      rear-biased formation never forces a leader crossing.
-    * Pairwise slot separation stays = sqrt(2) * radius, preserving the
-      visual "ring around the leader" impression.
-    """
+    """Four followers on a ring; diagonal quadrants avoid leader-line crossings when blending."""
     radius = spacing * 1.6
     offsets: List[Offset] = []
     for i in range(4):
@@ -87,14 +70,7 @@ def staggered(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
 
 
 def column_n(spacing: float = 0.7, z: float = 0.0) -> List[Offset]:
-    """Strict single-file column: all followers sit directly behind the leader.
-
-    Lateral offset is kept at zero so the swarm can be compressed through
-    narrow gaps (e.g. the 1.0 m window in stage 2). The longitudinal spacing
-    is clamped to <= 0.5 m so the whole 5-drone chain (tail sits ~2.0 m behind
-    the leader) can fit in the limited clearance between the last wall and the
-    stage boundary when crossing the last window.
-    """
+    """Single-file behind leader; spacing clamped for narrow stage-2 windows."""
     s = min(spacing, 0.5)
     return [
         (-s, 0.0, z),

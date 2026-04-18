@@ -15,18 +15,7 @@ Vec3 = Tuple[float, float, float]
 
 @dataclass(frozen=True)
 class WindowSpec:
-    """Window parameters in both local and global coordinates.
-
-    NOTE on YAML layout: despite the comment ``# y, x`` inside
-    ``scenarios/*.yaml``, the two entries of ``window.center`` are consumed by
-    ``utils/generate_world_from_scenario.py`` as ``[local_x, local_y]`` where
-    ``local_x`` is the opening offset along the wall (world +x because the wall
-    is not rotated) and ``local_y`` is the wall-origin offset along world y.
-    The geometry: a wall lies at ``y = stage_center_y + local_y`` and extends
-    along world x over ``stage_size[1]`` metres with thickness along y,
-    therefore drones must traverse along the y axis through the opening at
-    ``x = stage_center_x + local_x``.
-    """
+    """Wall gap: ``center_local_xy`` is [along-wall x, along-wall y] in stage YAML."""
 
     window_id: str
     center_local_xy: Vec2

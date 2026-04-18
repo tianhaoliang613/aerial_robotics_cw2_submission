@@ -51,6 +51,32 @@ def densify_polyline(path_xy: Iterable[Vec2], step: float, z: float) -> List[Vec
     return output
 
 
+def greedy_slot_assignment(
+    current_positions: Sequence[Tuple[float, float]],
+    target_slots: Sequence[Tuple[float, float]],
+) -> List[int]:
+    """Greedy nearest-neighbour: slot order -> drone index in ``current_positions``."""
+    n_slots = len(target_slots)
+    n_drones = len(current_positions)
+    slot_to_drone: List[int] = [-1] * n_slots
+    assigned: set = set()
+    for slot_idx in range(min(n_slots, n_drones)):
+        sx, sy = target_slots[slot_idx]
+        best_d = float("inf")
+        best_i = -1
+        for di, (px, py) in enumerate(current_positions):
+            if di in assigned:
+                continue
+            d2 = (sx - px) * (sx - px) + (sy - py) * (sy - py)
+            if d2 < best_d:
+                best_d = d2
+                best_i = di
+        if best_i >= 0:
+            slot_to_drone[slot_idx] = best_i
+            assigned.add(best_i)
+    return slot_to_drone
+
+
 def interpolate_points(start: Vec3, end: Vec3, count: int) -> List[Vec3]:
     """Linear interpolation including both endpoints."""
     if count <= 1:

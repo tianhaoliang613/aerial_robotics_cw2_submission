@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from math import atan2, cos, hypot, radians, sin, tan
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from math import atan2, hypot, radians, tan
+from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
 
 Vec2 = Tuple[float, float]
@@ -132,16 +132,7 @@ def smooth_path(path_xy: Sequence[Vec2]) -> List[Vec2]:
     return result
 
 
-# Upper bound on any obstacle speed we will trust for forward prediction.
-# The simulator's obstacle plugin runs at movement_velocity=0.5 m/s, so any
-# estimate above ~1.0 m/s is almost certainly a mis-association artefact
-# from the spatial-clustering monitor (we have observed velocity spikes
-# of 140+ m/s from cross-track swaps). Rather than scaling the direction
-# (which keeps a random direction from the spike), we simply DROP
-# untrusted estimates to zero -- safer, because the obstacle's current
-# position is always known and treating it as momentarily stationary
-# still yields the correct lateral deflection from the segment push.
-_MAX_TRUSTED_OBSTACLE_SPEED = 1.0
+_MAX_TRUSTED_OBSTACLE_SPEED = 1.0  # m/s; ignore clustering velocity spikes above this
 
 
 def _predict_obstacle_xy(
@@ -169,44 +160,10 @@ def avoid_dynamic_obstacles(
     next_waypoint: Vec2,
     obstacles: Sequence[DynamicObstacle],
     safe_distance: float,
-    lookahead_s: float = 0.6,
-    goal: Optional[Vec2] = None,
-) -> Vec2:
-    """Lateral shift for dynamic obstacles.
-
-    With ``goal`` (stage4): only obstacles **ahead** in a narrow cone toward the
-    goal contribute; abeam and behind are ignored so setpoints are not yanked
-    by irrelevant pillars.
-
-    With ``goal`` is ``None``: legacy segment drone→waypoint rule.
-    """
-    if goal is not None:
-        return _avoid_goal_corridor(
-            drone_pos, next_waypoint, obstacles, safe_distance, lookahead_s, goal
-        )
-    return _avoid_segment_legacy(
-        drone_pos, next_waypoint, obstacles, safe_distance, lookahead_s
-    )
-
-
-def _avoid_goal_corridor(
-    drone_pos: Vec2,
-    next_waypoint: Vec2,
-    obstacles: Sequence[DynamicObstacle],
-    safe_distance: float,
     lookahead_s: float,
     goal: Vec2,
 ) -> Vec2:
-    """Lateral push along drone→goal ray.
-
-    * Half-plane ``s_along > 0`` drops obstacles behind the drone.
-    * Forward cone drops far-abeam clutter.
-    * Lateral clearance **ramps with along-distance**: only obstacles within a
-      **tight** strip react when they are still far ahead along the ray; within
-      ~4 m along-track the full ``min_d`` corridor applies so near head-on
-      pillars are not under-weighted while distant off-axis pillars stop
-      stealing the whole shift budget.
-    """
+    """Lateral shift toward ``next_waypoint``; only obstacles ahead in a cone toward ``goal``."""
     gx_raw = goal[0] - drone_pos[0]
     gy_raw = goal[1] - drone_pos[1]
     g_len = hypot(gx_raw, gy_raw)
@@ -216,17 +173,11 @@ def _avoid_goal_corridor(
     gy = gy_raw / g_len
     px, py = -gy, gx
 
-    # Forward cone: exclude obstacles *behind* (s<0) and far abeam. A narrow
-    # cone (~34°) filtered out many *ahead* pillars on stage4 (straight-line
-    # collision). ~58° + slack keeps head-on / diagonal threats while still
-    # dropping purely lateral clutter relative to the goal ray.
     cone_tan = tan(radians(58.0))
     s_ahead_min = 0.02
     s_ahead_max = min(10.0, g_len + 0.8)
     lateral_margin = 0.32
     cone_slack = 0.5
-    # Beyond this along-distance (m), lateral reaction uses ``lateral_tight``
-    # only; closer uses full ``min_d + lateral_margin`` (see loop body).
     near_along_m = 4.0
 
     shift_x = 0.0
@@ -257,8 +208,6 @@ def _avoid_goal_corridor(
         lateral_tight = max(obstacle.radius * 2.5, 0.52) + 0.15
         t_along = max(0.0, min(1.0, 1.0 - s_along / max(near_along_m, 1e-3)))
         eff_clear = lateral_tight + (lateral_full - lateral_tight) * t_along
-        # Corridor shift only for cone-valid threats; ``critical_near`` alone
-        # uses the emergency push below (avoids lateral shove on grazing side).
         if in_cone and d_line < eff_clear:
             overlap = (eff_clear - d_line) + 0.12
             if overlap <= 0.0:
@@ -298,62 +247,6 @@ def _avoid_goal_corridor(
         scale = cap / mag
         shift_x *= scale
         shift_y *= scale
-
-    return (next_waypoint[0] + shift_x, next_waypoint[1] + shift_y)
-
-
-def _avoid_segment_legacy(
-    drone_pos: Vec2,
-    next_waypoint: Vec2,
-    obstacles: Sequence[DynamicObstacle],
-    safe_distance: float,
-    lookahead_s: float,
-) -> Vec2:
-    """Legacy segment drone→waypoint avoidance (no global goal axis)."""
-    dx_seg = next_waypoint[0] - drone_pos[0]
-    dy_seg = next_waypoint[1] - drone_pos[1]
-    seg_len = hypot(dx_seg, dy_seg)
-    if seg_len < 1e-3:
-        seg_dir_x, seg_dir_y = 1.0, 0.0
-    else:
-        seg_dir_x = dx_seg / seg_len
-        seg_dir_y = dy_seg / seg_len
-    perp_x = -seg_dir_y
-    perp_y = seg_dir_x
-
-    shift_x = 0.0
-    shift_y = 0.0
-    for obstacle in obstacles:
-        ox, oy = _predict_obstacle_xy(obstacle, next_waypoint, lookahead_s)
-        min_distance = safe_distance + obstacle.radius
-
-        if seg_len > 1e-3:
-            t_proj = ((ox - drone_pos[0]) * dx_seg + (oy - drone_pos[1]) * dy_seg) / (
-                seg_len * seg_len
-            )
-            t_clamped = max(0.0, min(1.0, t_proj))
-            closest_x = drone_pos[0] + t_clamped * dx_seg
-            closest_y = drone_pos[1] + t_clamped * dy_seg
-            seg_dist = hypot(closest_x - ox, closest_y - oy)
-            if seg_dist < min_distance and t_proj > -0.1 and t_proj < 1.2:
-                side_cross = (ox - drone_pos[0]) * perp_x + (oy - drone_pos[1]) * perp_y
-                side = 1.0 if side_cross >= 0 else -1.0
-                overlap = (min_distance - seg_dist) + 0.3
-                shift_x += -side * perp_x * overlap
-                shift_y += -side * perp_y * overlap
-
-        dx_d = drone_pos[0] - ox
-        dy_d = drone_pos[1] - oy
-        d_d = hypot(dx_d, dy_d)
-        emergency_dist = min_distance + 0.5
-        if d_d < emergency_dist:
-            if d_d < 1e-3:
-                push_x, push_y = perp_x, perp_y
-            else:
-                push_x, push_y = dx_d / d_d, dy_d / d_d
-            overlap_d = (emergency_dist - d_d) + 0.4
-            shift_x += push_x * overlap_d
-            shift_y += push_y * overlap_d
 
     return (next_waypoint[0] + shift_x, next_waypoint[1] + shift_y)
 

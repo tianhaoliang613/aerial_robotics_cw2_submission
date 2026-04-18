@@ -106,7 +106,4 @@ while true; do
     sleep 3
 done
 echo "[pre-flight] all drones ready (platform + arm/offboard svc), starting mission."
-# #region agent log
-python3 -c "import json,time,os;open('/home/tianhaoliang/.cursor/debug.log','a').write(json.dumps({'location':'run_mission.sh','message':'pre exec mission','hypothesisId':'H5','timestamp':int(time.time()*1000),'data':{'FASTDDS_BUILTIN_TRANSPORTS':os.environ.get('FASTDDS_BUILTIN_TRANSPORTS'),'argv':os.environ.get('_','')}})+'\n')" 2>/dev/null || true
-# #endregion
 exec python3 mission_centralised.py "$@"
